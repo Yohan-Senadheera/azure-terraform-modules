@@ -12,9 +12,16 @@
 terraform {
   required_version = ">= 0.13"
   required_providers {
+    # Pinned to the 4.x line, not left open-ended: AKS-Generic and
+    # Virtual-Network (both composed here) use azurerm_subnet arguments
+    # that azurerm 5.x removed (service_endpoints,
+    # private_endpoint_network_policies) - this is a pre-existing gap in
+    # those modules, not something this composite works around by design.
+    # ~> 4.0 is the newest line where the whole dependency graph validates;
+    # widen this once AKS-Generic/Virtual-Network are updated for 5.x.
     azurerm = {
       source  = "hashicorp/azurerm"
-      version = ">= 4.0.0"
+      version = "~> 4.0"
     }
   }
 }
