@@ -192,3 +192,22 @@ variable "bastion_public_address_prefixes" {
   description = "Source CIDRs allowed to reach Bastion when bastion_allow_https_internet_inbound is false"
   default     = []
 }
+
+variable "deploy_identities" {
+  type = map(object({
+    namespace            = string
+    service_account_name = string
+  }))
+  description = "Per-env Workload Identity Federation identities for pipeline pods (\"Pipeline pod -> deployment target: Cloud-native Workload Identity Federation / IRSA, scoped per env\" per the security review doc). One User-Assigned Managed Identity + Federated Identity Credential per map entry, trusted via this cluster's own OIDC issuer and scoped to exactly that (namespace, ServiceAccount) subject. This module only creates the identity - actual permissions are granted via deploy_identity_role_assignments below, since what a pipeline needs to reach is caller-specific."
+  default     = {}
+}
+
+variable "deploy_identity_role_assignments" {
+  type = list(object({
+    identity_key         = string # must match a key in deploy_identities
+    role_definition_name = string
+    scope                = string
+  }))
+  description = "Azure RBAC role assignments granting each deploy identity access to its real deployment target - a list (not a map) since one identity may need more than one role/scope."
+  default     = []
+}

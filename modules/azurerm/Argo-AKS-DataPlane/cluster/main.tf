@@ -429,3 +429,36 @@ resource "azurerm_bastion_host" "this" {
 
   depends_on = [azurerm_subnet_network_security_group_association.bastion]
 }
+
+# --- Per-env Workload Identity Federation for pipeline pods. Trust is
+#     scoped to exactly one (namespace, ServiceAccount) subject per entry -
+#     no wildcard, no cross-env reuse possible. Permissions are granted
+#     separately below, since what a pipeline actually needs to reach is
+#     caller-specific, not something this module has an opinion on. ---
+
+resource "azurerm_user_assigned_identity" "deploy_identity" {
+  for_each = var.deploy_identities
+
+  name                = "${var.aks_cluster_name}-deploy-${each.key}"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+  tags                = var.tags
+}
+
+resource "azurerm_federated_identity_credential" "deploy_identity" {
+  for_each = var.deploy_identities
+
+  name                      = "${var.aks_cluster_name}-deploy-${each.key}"
+  user_assigned_identity_id = azurerm_user_assigned_identity.deploy_identity[each.key].id
+  audience                  = ["api://AzureADTokenExchange"]
+  issuer                    = azurerm_kubernetes_cluster.this.oidc_issuer_url
+  subject                   = "system:serviceaccount:${each.value.namespace}:${each.value.service_account_name}"
+}
+
+resource "azurerm_role_assignment" "deploy_identity" {
+  for_each = { for idx, ra in var.deploy_identity_role_assignments : idx => ra }
+
+  principal_id         = azurerm_user_assigned_identity.deploy_identity[each.value.identity_key].principal_id
+  role_definition_name = each.value.role_definition_name
+  scope                = each.value.scope
+}
