@@ -10,37 +10,37 @@
 # --------------------------------------------------------------------------------------
 
 output "aks_cluster_name" {
-  value = module.aks.aks_cluster_name
+  value = azurerm_kubernetes_cluster.this.name
 }
 
 output "aks_cluster_id" {
-  value = module.aks.aks_cluster_id
+  value = azurerm_kubernetes_cluster.this.id
 }
 
 output "kubernetes_cluster_fqdn" {
-  value = module.aks.kubernetes_cluster_fqdn
+  value = azurerm_kubernetes_cluster.this.fqdn
 }
 
 output "kubernetes_cluster_private_fqdn" {
-  value = module.aks.kubernetes_cluster_private_fqdn
+  value = azurerm_kubernetes_cluster.this.private_fqdn
 }
 
 output "aks_oidc_issuer_url" {
-  value = module.aks.aks_oidc_issuer_url
+  value = azurerm_kubernetes_cluster.this.oidc_issuer_url
 }
 
 output "virtual_network_name" {
-  value = module.vnet.virtual_network_name
+  value = azurerm_virtual_network.this.name
 }
 
 output "stage_subnet_id" {
-  value = module.aks.aks_node_pool_subnet_id
+  value = azurerm_subnet.stage.id
 }
 
 output "prod_subnet_id" {
-  value = module.prod_subnet.subnet_id
+  value = azurerm_subnet.prod.id
 }
 
 output "bastion_host_id" {
-  value = var.enable_bastion ? module.bastion[0].bastion_host_id : null
+  value = var.enable_bastion ? azurerm_bastion_host.this[0].id : null
 }
