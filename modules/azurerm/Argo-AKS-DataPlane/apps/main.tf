@@ -67,6 +67,57 @@ resource "helm_release" "argocd" {
   depends_on = [kubernetes_namespace_v1.this]
 }
 
+# --- External Secrets Operator - syncs this data plane's IS-deploy tier
+#     secrets from Azure Key Vault. Unlike the AWS apps modules, ESO's own
+#     controller pod needs no identity annotation here - the
+#     ClusterSecretStore it applies below authenticates via
+#     serviceAccountRef, pointing at one of the federated ServiceAccounts
+#     created below instead. ---
+
+resource "kubernetes_namespace_v1" "external_secrets" {
+  count = var.install_external_secrets ? 1 : 0
+
+  metadata {
+    name = var.eso_namespace
+  }
+}
+
+resource "helm_release" "external_secrets" {
+  count = var.install_external_secrets ? 1 : 0
+
+  name             = "external-secrets"
+  repository       = var.eso_helm_repo
+  chart            = "external-secrets"
+  version          = var.eso_chart_version
+  namespace        = var.eso_namespace
+  create_namespace = false
+
+  depends_on = [kubernetes_namespace_v1.external_secrets]
+}
+
+# ServiceAccounts a ClusterSecretStore's serviceAccountRef (or any other
+# Workload-Identity-authenticated workload) authenticates as - each
+# annotated with the client_id of a cluster module deploy_identities
+# entry, trusted via this cluster's own AKS OIDC issuer for exactly that
+# (namespace, name) subject. Real example: asgardeo-is-deploy-sa in the
+# system_namespace, consumed by azure-kv-store's ClusterSecretStore.
+resource "kubernetes_service_account_v1" "federated" {
+  for_each = var.federated_service_accounts
+
+  metadata {
+    name      = each.key
+    namespace = each.value.namespace
+    annotations = {
+      "azure.workload.identity/client-id" = each.value.client_id
+    }
+    labels = {
+      "azure.workload.identity/use" = "true"
+    }
+  }
+
+  depends_on = [kubernetes_namespace_v1.this]
+}
+
 # Several real pipeline manifests are multi-document YAML (Deployment +
 # Service + IngressRoute in one file, multiple RBAC objects, etc.) -
 # yamldecode() only parses a single document, so each file is split on a
@@ -91,4 +142,30 @@ resource "kubernetes_manifest" "this" {
   manifest = each.value
 
   depends_on = [helm_release.argo_workflows, helm_release.argo_events, helm_release.argocd]
+}
+
+# CRD-backed manifests (ESO's ClusterSecretStore/ExternalSecret) applied in
+# the same run that installs their CRDs - see the AWS apps modules'
+# identical mechanism for why kubectl_manifest, not kubernetes_manifest,
+# is required here.
+locals {
+  kubectl_manifest_documents = flatten([
+    for idx, m in var.kubectl_manifest_files : [
+      for doc_idx, doc in [
+        for chunk in split("\n---\n", "\n${m.content != null ? m.content : templatefile(m.location, m.template_map)}") : chunk
+        if trimspace(chunk) != ""
+        ] : {
+        key  = "${idx}-${doc_idx}"
+        body = doc
+      }
+    ]
+  ])
+}
+
+resource "kubectl_manifest" "extra" {
+  for_each = { for d in local.kubectl_manifest_documents : d.key => d.body }
+
+  yaml_body = each.value
+
+  depends_on = [helm_release.external_secrets, kubernetes_service_account_v1.federated, helm_release.argo_workflows, helm_release.argo_events, helm_release.argocd]
 }

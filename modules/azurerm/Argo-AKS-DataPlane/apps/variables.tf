@@ -96,3 +96,43 @@ variable "manifest_files" {
   description = "Additional Kubernetes manifests to apply after the Helm releases above - e.g. debug-access RBAC, EventSource/Sensor definitions, ArgoCD Application/AppProject objects, ExternalSecrets/ClusterSecretStore for Workload Identity. Content and ordering are entirely caller-supplied."
   default     = []
 }
+
+variable "install_external_secrets" {
+  type        = bool
+  description = "Install External Secrets Operator, syncing this data plane's IS-deploy tier secrets from Azure Key Vault via Workload Identity."
+  default     = true
+}
+
+variable "eso_chart_version" {
+  type    = string
+  default = null
+}
+
+variable "eso_helm_repo" {
+  type    = string
+  default = "https://charts.external-secrets.io"
+}
+
+variable "eso_namespace" {
+  type    = string
+  default = "external-secrets"
+}
+
+variable "federated_service_accounts" {
+  type = map(object({
+    namespace = string
+    client_id = string
+  }))
+  description = "ServiceAccounts to create, each annotated with azure.workload.identity/client-id - the identity a ClusterSecretStore's serviceAccountRef (or any other Workload-Identity-authenticated workload) presents. client_id should come from the cluster module's deploy_identity_client_ids output for a matching (namespace, name) entry in its deploy_identities."
+  default     = {}
+}
+
+variable "kubectl_manifest_files" {
+  type = list(object({
+    location     = optional(string)
+    content      = optional(string)
+    template_map = optional(map(string), {})
+  }))
+  description = "Manifests applied via the alekc/kubectl provider instead of kubernetes_manifest - required for anything backed by a CRD installed in this same apply (ESO's ClusterSecretStore/ExternalSecret). Set content directly to pre-process a real file's text instead of rendering location as-is."
+  default     = []
+}
