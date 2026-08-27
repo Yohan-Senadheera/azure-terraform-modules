@@ -44,3 +44,8 @@ output "prod_subnet_id" {
 output "bastion_host_id" {
   value = var.enable_bastion ? azurerm_bastion_host.this[0].id : null
 }
+
+output "deploy_identity_client_ids" {
+  description = "Client ID per deploy_identities entry - annotate the matching ServiceAccount with azure.workload.identity/client-id: <this value>"
+  value       = { for k, i in azurerm_user_assigned_identity.deploy_identity : k => i.client_id }
+}
