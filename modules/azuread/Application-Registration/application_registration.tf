@@ -19,9 +19,22 @@
 # --------------------------------------------------------------------------------------
 
 resource "azuread_application_registration" "ad_application" {
-  display_name = var.application_name
+  display_name            = var.application_name
+  group_membership_claims = var.group_membership_claims
 
   lifecycle {
     create_before_destroy = true
   }
+}
+
+# Redirect URIs live on a separate resource in this provider version -
+# azuread_application_registration itself has no such argument, and this
+# resource is explicitly incompatible with the older azuread_application
+# resource (not used here, so no conflict).
+resource "azuread_application_redirect_uris" "ad_application" {
+  count = length(var.redirect_uris) > 0 ? 1 : 0
+
+  application_id = azuread_application_registration.ad_application.id
+  type           = var.redirect_uri_type
+  redirect_uris  = var.redirect_uris
 }

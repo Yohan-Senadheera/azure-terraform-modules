@@ -22,3 +22,21 @@ variable "application_name" {
   description = "The name of the application"
   type        = string
 }
+
+variable "group_membership_claims" {
+  description = "Configures the groups claim issued in a token this app expects. One or more of: None, SecurityGroup, DirectoryRole, ApplicationGroup, All."
+  type        = list(string)
+  default     = null
+}
+
+variable "redirect_uris" {
+  description = "Redirect URIs to assign to the application. Leave empty to skip creating the azuread_application_redirect_uris resource entirely (existing callers of this module are unaffected)."
+  type        = list(string)
+  default     = []
+}
+
+variable "redirect_uri_type" {
+  description = "The type of redirect URIs in redirect_uris. One of: PublicClient, SPA, Web."
+  type        = string
+  default     = "Web"
+}
