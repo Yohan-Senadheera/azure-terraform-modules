@@ -31,8 +31,16 @@ resource "azuread_application_registration" "ad_application" {
 # azuread_application_registration itself has no such argument, and this
 # resource is explicitly incompatible with the older azuread_application
 # resource (not used here, so no conflict).
+#
+# count is gated on var.manage_redirect_uris (a plain bool literal the
+# caller sets), NOT on length(var.redirect_uris) - count/for_each can
+# never depend on a value that's unknown until apply, and redirect_uris'
+# real-world callers often build that list from something only known
+# post-apply (e.g. a LoadBalancer hostname). The list's *content* is a
+# normal resource argument, so it being apply-time-unknown is fine; only
+# the *count* needs to stay plan-time-known.
 resource "azuread_application_redirect_uris" "ad_application" {
-  count = length(var.redirect_uris) > 0 ? 1 : 0
+  count = var.manage_redirect_uris ? 1 : 0
 
   application_id = azuread_application_registration.ad_application.id
   type           = var.redirect_uri_type

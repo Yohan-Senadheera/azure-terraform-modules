@@ -29,8 +29,14 @@ variable "group_membership_claims" {
   default     = null
 }
 
+variable "manage_redirect_uris" {
+  description = "Whether to create the azuread_application_redirect_uris resource at all. Must be a plain bool the caller controls directly - do not derive this from whether redirect_uris happens to be non-empty, since that value can be unknown until apply and count/for_each can't depend on it."
+  type        = bool
+  default     = false
+}
+
 variable "redirect_uris" {
-  description = "Redirect URIs to assign to the application. Leave empty to skip creating the azuread_application_redirect_uris resource entirely (existing callers of this module are unaffected)."
+  description = "Redirect URIs to assign to the application. Only used when manage_redirect_uris = true; this value itself may safely be unknown until apply (e.g. built from a LoadBalancer hostname)."
   type        = list(string)
   default     = []
 }
