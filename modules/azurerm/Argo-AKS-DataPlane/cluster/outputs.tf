@@ -49,3 +49,13 @@ output "deploy_identity_client_ids" {
   description = "Client ID per deploy_identities entry - annotate the matching ServiceAccount with azure.workload.identity/client-id: <this value>"
   value       = { for k, i in azurerm_user_assigned_identity.deploy_identity : k => i.client_id }
 }
+
+output "workflow_controller_artifacts_client_id" {
+  description = "Client ID for the workflow-controller ServiceAccount's azure.workload.identity/client-id annotation - null unless enable_artifact_archiving is true. The pod also needs the azure.workload.identity/use: \"true\" label (controller.podLabels in argo_workflows_values) for AKS's webhook to inject the token."
+  value       = var.enable_artifact_archiving ? azurerm_user_assigned_identity.workflow_controller_artifacts[0].client_id : null
+}
+
+output "artifact_storage_account_name" {
+  description = "Storage account Argo Workflows should archive logs/artifacts to - null unless enable_artifact_archiving is true"
+  value       = var.enable_artifact_archiving ? azurerm_storage_account.argo_logs[0].name : null
+}

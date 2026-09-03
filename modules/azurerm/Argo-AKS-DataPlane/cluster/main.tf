@@ -213,6 +213,20 @@ resource "azurerm_kubernetes_cluster" "this" {
   oidc_issuer_enabled       = true
   workload_identity_enabled = true
 
+  # AKS's control-plane identity (this cluster's own SystemAssigned
+  # identity) needs Key Vault access to actually use this key - see
+  # azurerm_role_assignment.kms below, which necessarily depends on this
+  # same cluster resource. Enabling this on the SAME apply that first
+  # creates the cluster will fail (the role grant can't exist before the
+  # identity does); enable_secrets_encryption must be turned on in a
+  # follow-up apply once the cluster already exists.
+  dynamic "key_management_service" {
+    for_each = var.enable_secrets_encryption ? [1] : []
+    content {
+      key_vault_key_id = azurerm_key_vault_key.cluster_secrets[0].id
+    }
+  }
+
   tags = var.tags
 
   depends_on = [
@@ -241,6 +255,178 @@ resource "azurerm_kubernetes_cluster_node_pool" "prod" {
     azurerm_subnet_nat_gateway_association.prod,
     azurerm_subnet_network_security_group_association.prod,
   ]
+}
+
+# --- etcd secrets encryption (AKS's KMS feature) - see the
+#     key_management_service block above for the two-apply caveat ---
+
+data "azurerm_client_config" "current" {
+  count = var.enable_secrets_encryption ? 1 : 0
+}
+
+resource "azurerm_key_vault" "cluster_secrets" {
+  count = var.enable_secrets_encryption ? 1 : 0
+
+  # Key Vault names must be <=24 chars.
+  name                       = substr("${var.aks_cluster_name}-kv", 0, 24)
+  location                   = var.location
+  resource_group_name        = var.resource_group_name
+  tenant_id                  = data.azurerm_client_config.current[0].tenant_id
+  sku_name                   = "standard"
+  rbac_authorization_enabled = true
+  purge_protection_enabled   = true
+  soft_delete_retention_days = 90
+  tags                       = var.tags
+}
+
+resource "azurerm_key_vault_key" "cluster_secrets" {
+  count = var.enable_secrets_encryption ? 1 : 0
+
+  name         = "${var.aks_cluster_name}-etcd-key"
+  key_vault_id = azurerm_key_vault.cluster_secrets[0].id
+  key_type     = "RSA"
+  key_size     = 2048
+  key_opts     = ["decrypt", "encrypt", "unwrapKey", "wrapKey"]
+
+  depends_on = [azurerm_role_assignment.cluster_secrets_admin]
+}
+
+# The identity running `terraform apply` needs its own grant to create
+# the key above - Key Vault's RBAC model requires this even for the
+# account that just created the vault.
+resource "azurerm_role_assignment" "cluster_secrets_admin" {
+  count = var.enable_secrets_encryption ? 1 : 0
+
+  scope                = azurerm_key_vault.cluster_secrets[0].id
+  role_definition_name = "Key Vault Crypto Officer"
+  principal_id         = data.azurerm_client_config.current[0].object_id
+}
+
+# The cluster's own control-plane identity - see the key_management_service
+# comment above for why this can't be part of the same apply that creates
+# the cluster.
+resource "azurerm_role_assignment" "kms" {
+  count = var.enable_secrets_encryption ? 1 : 0
+
+  scope                = azurerm_key_vault.cluster_secrets[0].id
+  role_definition_name = "Key Vault Crypto Service Encryption User"
+  principal_id         = azurerm_kubernetes_cluster.this.identity[0].principal_id
+}
+
+# --- NSG Flow Logs - duplicates what a VPC-Flow-Log-equivalent module
+#     would do, kept opt-in for the same reason the AWS side is. Requires
+#     Network Watcher already enabled for this region (Azure's default,
+#     but org policy can disable it - hence caller-supplied, not assumed). ---
+
+resource "azurerm_storage_account" "flow_logs" {
+  count = var.enable_vpc_flow_logs ? 1 : 0
+
+  # Storage account names must be <=24 chars, lowercase alphanumeric only.
+  name                     = substr(lower(replace("${var.aks_cluster_name}flowlogs", "-", "")), 0, 24)
+  resource_group_name      = var.resource_group_name
+  location                 = var.location
+  account_tier             = "Standard"
+  account_replication_type = "LRS"
+  tags                     = var.tags
+}
+
+resource "azurerm_network_watcher_flow_log" "stage" {
+  count = var.enable_vpc_flow_logs ? 1 : 0
+
+  name                 = "${var.aks_cluster_name}-stage-flow-log"
+  network_watcher_name = var.network_watcher_name
+  resource_group_name  = var.network_watcher_resource_group_name
+  target_resource_id   = azurerm_network_security_group.stage.id
+  storage_account_id   = azurerm_storage_account.flow_logs[0].id
+  enabled              = true
+  retention_policy {
+    enabled = true
+    days    = var.log_retention_in_days
+  }
+}
+
+resource "azurerm_network_watcher_flow_log" "prod" {
+  count = var.enable_vpc_flow_logs ? 1 : 0
+
+  name                 = "${var.aks_cluster_name}-prod-flow-log"
+  network_watcher_name = var.network_watcher_name
+  resource_group_name  = var.network_watcher_resource_group_name
+  target_resource_id   = azurerm_network_security_group.prod.id
+  storage_account_id   = azurerm_storage_account.flow_logs[0].id
+  enabled              = true
+  retention_policy {
+    enabled = true
+    days    = var.log_retention_in_days
+  }
+}
+
+# --- Argo's own artifact repository - see Argo-EKS-DataPlane's identical
+#     rationale. Workload Identity Federation instead of IRSA, otherwise
+#     the same shape. ---
+
+resource "azurerm_storage_account" "argo_logs" {
+  count = var.enable_artifact_archiving ? 1 : 0
+
+  name                     = substr(lower(replace("${var.aks_cluster_name}argologs", "-", "")), 0, 24)
+  resource_group_name      = var.resource_group_name
+  location                 = var.location
+  account_tier             = "Standard"
+  account_replication_type = "LRS"
+  tags                     = var.tags
+}
+
+resource "azurerm_storage_container" "argo_logs" {
+  count = var.enable_artifact_archiving ? 1 : 0
+
+  name                  = "argo-logs"
+  storage_account_id    = azurerm_storage_account.argo_logs[0].id
+  container_access_type = "private"
+}
+
+resource "azurerm_storage_management_policy" "argo_logs" {
+  count = var.enable_artifact_archiving ? 1 : 0
+
+  storage_account_id = azurerm_storage_account.argo_logs[0].id
+
+  rule {
+    name    = "expire-after-retention"
+    enabled = true
+    filters {
+      blob_types = ["blockBlob"]
+    }
+    actions {
+      base_blob {
+        delete_after_days_since_modification_greater_than = var.log_retention_in_days
+      }
+    }
+  }
+}
+
+resource "azurerm_user_assigned_identity" "workflow_controller_artifacts" {
+  count = var.enable_artifact_archiving ? 1 : 0
+
+  name                = "${var.aks_cluster_name}-workflow-artifacts"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+  tags                = var.tags
+}
+
+resource "azurerm_federated_identity_credential" "workflow_controller_artifacts" {
+  count = var.enable_artifact_archiving ? 1 : 0
+
+  name                      = "${var.aks_cluster_name}-workflow-artifacts"
+  user_assigned_identity_id = azurerm_user_assigned_identity.workflow_controller_artifacts[0].id
+  audience                  = ["api://AzureADTokenExchange"]
+  issuer                    = azurerm_kubernetes_cluster.this.oidc_issuer_url
+  subject                   = "system:serviceaccount:${var.argo_namespace}:${var.workflow_controller_service_account_name}"
+}
+
+resource "azurerm_role_assignment" "workflow_controller_artifacts" {
+  count = var.enable_artifact_archiving ? 1 : 0
+
+  scope                = azurerm_storage_account.argo_logs[0].id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = azurerm_user_assigned_identity.workflow_controller_artifacts[0].principal_id
 }
 
 # --- Bastion: native-identity admin access path (login-flow decision) ---

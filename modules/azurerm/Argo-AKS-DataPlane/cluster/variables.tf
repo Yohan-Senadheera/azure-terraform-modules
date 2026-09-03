@@ -211,3 +211,51 @@ variable "deploy_identity_role_assignments" {
   description = "Azure RBAC role assignments granting each deploy identity access to its real deployment target - a list (not a map) since one identity may need more than one role/scope."
   default     = []
 }
+
+variable "enable_secrets_encryption" {
+  type        = bool
+  description = "Whether to create a Key Vault + key and enable AKS's etcd secrets encryption (key_management_service) with it. See the key_management_service block's own comment - this can only be turned on in a follow-up apply after the cluster already exists, never on the same apply that first creates it."
+  default     = false
+}
+
+variable "log_retention_in_days" {
+  type        = number
+  description = "Retention for NSG Flow Logs and the S3-equivalent artifact storage account's blob expiration, if enabled"
+  default     = 90
+}
+
+variable "enable_vpc_flow_logs" {
+  type        = bool
+  description = "Whether to create NSG Flow Logs for the stage and prod network security groups, published to a dedicated storage account"
+  default     = false
+}
+
+variable "network_watcher_name" {
+  type        = string
+  description = "Name of the region's existing Network Watcher - required when enable_vpc_flow_logs is true. Azure auto-creates one per region by default (e.g. \"NetworkWatcher_<region>\"), but org policy can disable this, so it's caller-supplied rather than assumed."
+  default     = null
+}
+
+variable "network_watcher_resource_group_name" {
+  type        = string
+  description = "Resource group containing network_watcher_name - required when enable_vpc_flow_logs is true"
+  default     = null
+}
+
+variable "enable_artifact_archiving" {
+  type        = bool
+  description = "Whether to create a Storage Account + container + Workload Identity Federation identity for Argo Workflows to archive workflow logs/artifacts to (workflow_controller_artifacts_client_id/artifact_storage_account_name outputs). The caller still wires these into argo_workflows_values' artifactRepository Helm config."
+  default     = false
+}
+
+variable "argo_namespace" {
+  type        = string
+  description = "Kubernetes namespace Argo Workflows runs in - only used to scope the workflow-controller's federated identity subject when enable_artifact_archiving is true"
+  default     = "argo"
+}
+
+variable "workflow_controller_service_account_name" {
+  type        = string
+  description = "ServiceAccount name the argo-workflows Helm chart creates for workflow-controller - only used to scope the federated identity subject when enable_artifact_archiving is true"
+  default     = "argo-workflows-workflow-controller"
+}
