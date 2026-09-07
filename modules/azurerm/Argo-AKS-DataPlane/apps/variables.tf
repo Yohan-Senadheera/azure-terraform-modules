@@ -90,10 +90,11 @@ variable "argocd_values" {
 
 variable "manifest_files" {
   type = list(object({
-    location     = string
+    location     = optional(string)
+    content      = optional(string)
     template_map = optional(map(string), {})
   }))
-  description = "Additional Kubernetes manifests to apply after the Helm releases above - e.g. debug-access RBAC, EventSource/Sensor definitions, ArgoCD Application/AppProject objects, ExternalSecrets/ClusterSecretStore for Workload Identity. Content and ordering are entirely caller-supplied."
+  description = "Additional Kubernetes manifests to apply after the Helm releases above - e.g. debug-access RBAC, EventSource/Sensor definitions, ArgoCD Application/AppProject objects, ExternalSecrets/ClusterSecretStore for Workload Identity. Content and ordering are entirely caller-supplied. Set content directly to pass already-fetched text instead of rendering location as a local file path."
   default     = []
 }
 
