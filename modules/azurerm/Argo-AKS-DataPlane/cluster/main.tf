@@ -438,7 +438,7 @@ resource "azurerm_federated_identity_credential" "workflow_controller_artifacts"
 }
 
 resource "azurerm_role_assignment" "workflow_controller_artifacts" {
-  count = var.enable_artifact_archiving ? 1 : 0
+  count = var.enable_artifact_archiving && var.create_role_assignments ? 1 : 0
 
   scope                = azurerm_storage_account.argo_logs[0].id
   role_definition_name = "Storage Blob Data Contributor"
@@ -658,7 +658,7 @@ resource "azurerm_federated_identity_credential" "deploy_identity" {
 }
 
 resource "azurerm_role_assignment" "deploy_identity" {
-  for_each = { for idx, ra in var.deploy_identity_role_assignments : idx => ra }
+  for_each = var.create_role_assignments ? { for idx, ra in var.deploy_identity_role_assignments : idx => ra } : {}
 
   principal_id         = azurerm_user_assigned_identity.deploy_identity[each.value.identity_key].principal_id
   role_definition_name = each.value.role_definition_name

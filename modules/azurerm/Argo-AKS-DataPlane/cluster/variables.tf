@@ -20,6 +20,12 @@ variable "create_resource_group" {
   default     = true
 }
 
+variable "create_role_assignments" {
+  type        = bool
+  description = "Whether to create the azurerm_role_assignment resources this module wires up (workflow artifact storage access, deploy_identity_role_assignments). Requires Microsoft.Authorization/roleAssignments/write at the relevant scope (Owner or User Access Administrator) - a plain Contributor identity gets a 403 on these specifically. Set to false to still create the identities/federated credentials but skip granting them roles, until that permission exists or someone else grants the roles out-of-band."
+  default     = true
+}
+
 variable "location" {
   type        = string
   description = "Azure region"
