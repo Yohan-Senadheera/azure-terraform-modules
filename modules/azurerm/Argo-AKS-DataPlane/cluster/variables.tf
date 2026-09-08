@@ -14,6 +14,12 @@ variable "resource_group_name" {
   description = "Resource group for the data plane (AKS, VNet, NAT Gateways, Bastion)"
 }
 
+variable "create_resource_group" {
+  type        = bool
+  description = "Whether this module creates resource_group_name itself. Defaults to true so the module is self-contained; set to false to point at a resource group already managed elsewhere (e.g. by a platform team) instead of having this module own its lifecycle."
+  default     = true
+}
+
 variable "location" {
   type        = string
   description = "Azure region"

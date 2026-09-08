@@ -21,31 +21,47 @@
 #
 # --------------------------------------------------------------------------------------
 
+# Unlike AWS (no equivalent top-level container a VPC must live in), Azure
+# resources can't exist without a resource group first. create_resource_group
+# defaults to true so this module is self-contained; set it to false to
+# instead point resource_group_name at one that's already managed elsewhere
+# (e.g. by a platform team) without this module trying to own its lifecycle.
+resource "azurerm_resource_group" "this" {
+  count    = var.create_resource_group ? 1 : 0
+  name     = var.resource_group_name
+  location = var.location
+  tags     = var.tags
+}
+
+locals {
+  resource_group_name = var.create_resource_group ? azurerm_resource_group.this[0].name : var.resource_group_name
+}
+
 resource "azurerm_virtual_network" "this" {
   name                = var.vnet_name
   address_space       = [var.vnet_address_space]
   location            = var.location
-  resource_group_name = var.resource_group_name
+  resource_group_name = local.resource_group_name
   tags                = var.tags
 }
 
 resource "azurerm_subnet" "stage" {
   name                 = "${var.aks_cluster_name}-stage-snet"
-  resource_group_name  = var.resource_group_name
+  resource_group_name  = local.resource_group_name
   virtual_network_name = azurerm_virtual_network.this.name
   address_prefixes     = [var.stage_subnet_address_prefix]
 }
 
 resource "azurerm_subnet" "prod" {
   name                 = "${var.aks_cluster_name}-prod-snet"
-  resource_group_name  = var.resource_group_name
+  resource_group_name  = local.resource_group_name
   virtual_network_name = azurerm_virtual_network.this.name
   address_prefixes     = [var.prod_subnet_address_prefix]
 }
 
 resource "azurerm_subnet" "ilb" {
   name                 = "${var.aks_cluster_name}-ilb-snet"
-  resource_group_name  = var.resource_group_name
+  resource_group_name  = local.resource_group_name
   virtual_network_name = azurerm_virtual_network.this.name
   address_prefixes     = [var.internal_lb_subnet_address_prefix]
 }
@@ -56,7 +72,7 @@ resource "azurerm_subnet" "ilb" {
 resource "azurerm_network_security_group" "stage" {
   name                = "${var.aks_cluster_name}-stage-nsg"
   location            = var.location
-  resource_group_name = var.resource_group_name
+  resource_group_name = local.resource_group_name
   tags                = var.tags
 }
 
@@ -68,7 +84,7 @@ resource "azurerm_subnet_network_security_group_association" "stage" {
 resource "azurerm_network_security_group" "prod" {
   name                = "${var.aks_cluster_name}-prod-nsg"
   location            = var.location
-  resource_group_name = var.resource_group_name
+  resource_group_name = local.resource_group_name
   tags                = var.tags
 }
 
@@ -82,7 +98,7 @@ resource "azurerm_network_security_rule" "deny_stage_inbound_to_prod" {
   destination_port_range      = "*"
   source_address_prefix       = var.stage_subnet_address_prefix
   destination_address_prefix  = "*"
-  resource_group_name         = var.resource_group_name
+  resource_group_name         = local.resource_group_name
   network_security_group_name = azurerm_network_security_group.prod.name
 }
 
@@ -96,7 +112,7 @@ resource "azurerm_subnet_network_security_group_association" "prod" {
 resource "azurerm_public_ip" "stage_nat" {
   name                = "${var.aks_cluster_name}-stage-nat-pip"
   location            = var.location
-  resource_group_name = var.resource_group_name
+  resource_group_name = local.resource_group_name
   allocation_method   = "Static"
   sku                 = "Standard"
   tags                = var.tags
@@ -105,7 +121,7 @@ resource "azurerm_public_ip" "stage_nat" {
 resource "azurerm_nat_gateway" "stage" {
   name                = "${var.aks_cluster_name}-stage-nat"
   location            = var.location
-  resource_group_name = var.resource_group_name
+  resource_group_name = local.resource_group_name
   sku_name            = "Standard"
   tags                = var.tags
 }
@@ -123,7 +139,7 @@ resource "azurerm_subnet_nat_gateway_association" "stage" {
 resource "azurerm_public_ip" "prod_nat" {
   name                = "${var.aks_cluster_name}-prod-nat-pip"
   location            = var.location
-  resource_group_name = var.resource_group_name
+  resource_group_name = local.resource_group_name
   allocation_method   = "Static"
   sku                 = "Standard"
   tags                = var.tags
@@ -132,7 +148,7 @@ resource "azurerm_public_ip" "prod_nat" {
 resource "azurerm_nat_gateway" "prod" {
   name                = "${var.aks_cluster_name}-prod-nat"
   location            = var.location
-  resource_group_name = var.resource_group_name
+  resource_group_name = local.resource_group_name
   sku_name            = "Standard"
   tags                = var.tags
 }
@@ -153,7 +169,7 @@ resource "azurerm_subnet_nat_gateway_association" "prod" {
 resource "azurerm_kubernetes_cluster" "this" {
   name                = var.aks_cluster_name
   location            = var.location
-  resource_group_name = var.resource_group_name
+  resource_group_name = local.resource_group_name
   dns_prefix          = var.aks_dns_prefix
   kubernetes_version  = var.kubernetes_version
 
@@ -270,7 +286,7 @@ resource "azurerm_key_vault" "cluster_secrets" {
   # Key Vault names must be <=24 chars.
   name                       = substr("${var.aks_cluster_name}-kv", 0, 24)
   location                   = var.location
-  resource_group_name        = var.resource_group_name
+  resource_group_name        = local.resource_group_name
   tenant_id                  = data.azurerm_client_config.current[0].tenant_id
   sku_name                   = "standard"
   rbac_authorization_enabled = true
@@ -323,7 +339,7 @@ resource "azurerm_storage_account" "flow_logs" {
 
   # Storage account names must be <=24 chars, lowercase alphanumeric only.
   name                     = substr(lower(replace("${var.aks_cluster_name}flowlogs", "-", "")), 0, 24)
-  resource_group_name      = var.resource_group_name
+  resource_group_name      = local.resource_group_name
   location                 = var.location
   account_tier             = "Standard"
   account_replication_type = "LRS"
@@ -368,7 +384,7 @@ resource "azurerm_storage_account" "argo_logs" {
   count = var.enable_artifact_archiving ? 1 : 0
 
   name                     = substr(lower(replace("${var.aks_cluster_name}argologs", "-", "")), 0, 24)
-  resource_group_name      = var.resource_group_name
+  resource_group_name      = local.resource_group_name
   location                 = var.location
   account_tier             = "Standard"
   account_replication_type = "LRS"
@@ -407,7 +423,7 @@ resource "azurerm_user_assigned_identity" "workflow_controller_artifacts" {
 
   name                = "${var.aks_cluster_name}-workflow-artifacts"
   location            = var.location
-  resource_group_name = var.resource_group_name
+  resource_group_name = local.resource_group_name
   tags                = var.tags
 }
 
@@ -435,7 +451,7 @@ resource "azurerm_subnet" "bastion" {
   count = var.enable_bastion ? 1 : 0
 
   name                 = "AzureBastionSubnet"
-  resource_group_name  = var.resource_group_name
+  resource_group_name  = local.resource_group_name
   virtual_network_name = azurerm_virtual_network.this.name
   address_prefixes     = [var.bastion_subnet_address_prefix]
 }
@@ -445,7 +461,7 @@ resource "azurerm_public_ip" "bastion" {
 
   name                = "${var.aks_cluster_name}-bastion-pip"
   location            = var.location
-  resource_group_name = var.resource_group_name
+  resource_group_name = local.resource_group_name
   allocation_method   = "Static"
   sku                 = "Standard"
   tags                = var.tags
@@ -456,7 +472,7 @@ resource "azurerm_network_security_group" "bastion" {
 
   name                = "${var.aks_cluster_name}-bastion-nsg"
   location            = var.location
-  resource_group_name = var.resource_group_name
+  resource_group_name = local.resource_group_name
   tags                = var.tags
 }
 
@@ -473,7 +489,7 @@ resource "azurerm_network_security_rule" "bastion_allow_https_inbound" {
   source_address_prefix       = var.bastion_allow_https_internet_inbound ? "Internet" : null
   source_address_prefixes     = var.bastion_allow_https_internet_inbound ? null : var.bastion_public_address_prefixes
   destination_address_prefix  = "*"
-  resource_group_name         = var.resource_group_name
+  resource_group_name         = local.resource_group_name
   network_security_group_name = azurerm_network_security_group.bastion[0].name
 }
 
@@ -489,7 +505,7 @@ resource "azurerm_network_security_rule" "bastion_allow_gateway_manager_inbound"
   destination_port_range      = "443"
   source_address_prefix       = "GatewayManager"
   destination_address_prefix  = "*"
-  resource_group_name         = var.resource_group_name
+  resource_group_name         = local.resource_group_name
   network_security_group_name = azurerm_network_security_group.bastion[0].name
 }
 
@@ -505,7 +521,7 @@ resource "azurerm_network_security_rule" "bastion_allow_azure_lb_inbound" {
   destination_port_range      = "443"
   source_address_prefix       = "AzureLoadBalancer"
   destination_address_prefix  = "*"
-  resource_group_name         = var.resource_group_name
+  resource_group_name         = local.resource_group_name
   network_security_group_name = azurerm_network_security_group.bastion[0].name
 }
 
@@ -521,7 +537,7 @@ resource "azurerm_network_security_rule" "bastion_allow_host_comm_inbound" {
   destination_port_ranges     = ["8080", "5701"]
   source_address_prefix       = "VirtualNetwork"
   destination_address_prefix  = "VirtualNetwork"
-  resource_group_name         = var.resource_group_name
+  resource_group_name         = local.resource_group_name
   network_security_group_name = azurerm_network_security_group.bastion[0].name
 }
 
@@ -537,7 +553,7 @@ resource "azurerm_network_security_rule" "bastion_allow_ssh_rdp_outbound" {
   destination_port_ranges     = ["3389", "22"]
   source_address_prefix       = "*"
   destination_address_prefix  = "VirtualNetwork"
-  resource_group_name         = var.resource_group_name
+  resource_group_name         = local.resource_group_name
   network_security_group_name = azurerm_network_security_group.bastion[0].name
 }
 
@@ -553,7 +569,7 @@ resource "azurerm_network_security_rule" "bastion_allow_azure_cloud_outbound" {
   destination_port_range      = "443"
   source_address_prefix       = "*"
   destination_address_prefix  = "AzureCloud"
-  resource_group_name         = var.resource_group_name
+  resource_group_name         = local.resource_group_name
   network_security_group_name = azurerm_network_security_group.bastion[0].name
 }
 
@@ -569,7 +585,7 @@ resource "azurerm_network_security_rule" "bastion_allow_comm_outbound" {
   destination_port_ranges     = ["8080", "5701"]
   source_address_prefix       = "VirtualNetwork"
   destination_address_prefix  = "VirtualNetwork"
-  resource_group_name         = var.resource_group_name
+  resource_group_name         = local.resource_group_name
   network_security_group_name = azurerm_network_security_group.bastion[0].name
 }
 
@@ -585,7 +601,7 @@ resource "azurerm_network_security_rule" "bastion_allow_get_session_outbound" {
   destination_port_range      = "80"
   source_address_prefix       = "*"
   destination_address_prefix  = "Internet"
-  resource_group_name         = var.resource_group_name
+  resource_group_name         = local.resource_group_name
   network_security_group_name = azurerm_network_security_group.bastion[0].name
 }
 
@@ -601,7 +617,7 @@ resource "azurerm_bastion_host" "this" {
 
   name                = "${var.aks_cluster_name}-bastion"
   location            = var.location
-  resource_group_name = var.resource_group_name
+  resource_group_name = local.resource_group_name
   sku                 = "Standard"
   tunneling_enabled   = true
   ip_connect_enabled  = true
@@ -627,7 +643,7 @@ resource "azurerm_user_assigned_identity" "deploy_identity" {
 
   name                = "${var.aks_cluster_name}-deploy-${each.key}"
   location            = var.location
-  resource_group_name = var.resource_group_name
+  resource_group_name = local.resource_group_name
   tags                = var.tags
 }
 
