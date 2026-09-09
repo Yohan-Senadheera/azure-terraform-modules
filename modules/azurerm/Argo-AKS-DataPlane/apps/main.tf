@@ -119,9 +119,19 @@ resource "kubernetes_service_account_v1" "federated" {
 }
 
 # Several real pipeline manifests are multi-document YAML (Deployment +
-# Service + IngressRoute in one file, multiple RBAC objects, etc.) -
-# yamldecode() only parses a single document, so each file is split on a
-# bare "---" line first.
+# Service + IngressRoute in one file, multiple RBAC objects, etc.) - split
+# on a bare "---" line first, same as kubectl_manifest_documents below.
+#
+# kubectl_manifest (not kubernetes_manifest) here too, not just for the
+# CRD-backed entries below - same silent-client-construction-failure bug
+# control-plane's main.tf documents ("kubernetes_manifest's silent
+# token-drop bug with static tokens"): kubernetes_manifest builds its own
+# REST client independently of the rest of the provider, and that path
+# doesn't reliably work with exec-based auth (kubelogin here, aws eks
+# get-token on control-plane) - every instance failed with "cannot create
+# REST client: no client config" on a real apply, regardless of
+# parallelism. kubectl_manifest takes raw YAML text directly, so no
+# yamldecode() round-trip is needed either.
 locals {
   manifest_documents = flatten([
     for idx, m in var.manifest_files : [
@@ -129,17 +139,17 @@ locals {
         for chunk in split("\n---\n", "\n${m.content != null ? m.content : templatefile(m.location, m.template_map)}") : chunk
         if trimspace(chunk) != ""
         ] : {
-        key      = "${idx}-${doc_idx}"
-        manifest = yamldecode(doc)
+        key  = "${idx}-${doc_idx}"
+        body = doc
       }
     ]
   ])
 }
 
-resource "kubernetes_manifest" "this" {
-  for_each = { for d in local.manifest_documents : d.key => d.manifest }
+resource "kubectl_manifest" "this" {
+  for_each = { for d in local.manifest_documents : d.key => d.body }
 
-  manifest = each.value
+  yaml_body = each.value
 
   depends_on = [helm_release.argo_workflows, helm_release.argo_events, helm_release.argocd]
 }
