@@ -8,7 +8,6 @@
 # You may not alter or remove any copyright or other notice from copies of this content.
 #
 # --------------------------------------------------------------------------------------
-
 resource "azurerm_application_gateway" "app_gateway" {
   location            = var.location
   name                = join("-", compact([var.application_gateway_abbreviation, var.application_gateway_name]))
@@ -16,16 +15,28 @@ resource "azurerm_application_gateway" "app_gateway" {
   zones               = var.appgw_zones
   enable_http2        = var.enable_http2
   tags                = var.tags
+  firewall_policy_id  = azurerm_web_application_firewall_policy.waf_policy.id
 
   depends_on = [
     azurerm_network_security_group.network_security_group,
     azurerm_network_security_rule.default_network_security_rule,
     azurerm_network_security_rule.default_network_security_rule_2,
+    azurerm_web_application_firewall_policy.waf_policy,
   ]
 
   sku {
     name = "WAF_v2"
     tier = "WAF_v2"
+  }
+
+  ssl_policy {
+    policy_type          = "Custom"
+    min_protocol_version = "TLSv1_2"
+    cipher_suites = [
+      "TLS_DHE_RSA_WITH_AES_128_GCM_SHA256",
+      "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+      "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+    ]
   }
 
   autoscale_configuration {
@@ -57,35 +68,6 @@ resource "azurerm_application_gateway" "app_gateway" {
   gateway_ip_configuration {
     name      = var.application_gateway_ip_configuration_name
     subnet_id = azurerm_subnet.app_gateway_subnet.id
-  }
-
-  waf_configuration {
-    enabled                  = var.waf_enabled
-    file_upload_limit_mb     = var.waf_file_upload_limit_mb
-    firewall_mode            = var.waf_firewall_mode
-    max_request_body_size_kb = var.waf_max_request_body_size_kb
-    request_body_check       = var.waf_request_body_check
-    rule_set_type            = var.waf_rule_set_type
-    rule_set_version         = var.waf_rule_set_version
-
-    dynamic "disabled_rule_group" {
-      for_each = var.waf_disabled_rule_group_settings
-
-      content {
-        rule_group_name = disabled_rule_group.value["rule_group_name"]
-        rules           = disabled_rule_group.value["rules"]
-      }
-    }
-
-    dynamic "exclusion" {
-      for_each = var.waf_exclusion_settings
-
-      content {
-        match_variable          = exclusion.value["match_variable"]
-        selector                = exclusion.value["selector"]
-        selector_match_operator = exclusion.value["selector_match_operator"]
-      }
-    }
   }
 
   dynamic "ssl_profile" {
@@ -269,7 +251,8 @@ resource "azurerm_application_gateway" "app_gateway" {
       trusted_root_certificate,
       identity,
       trusted_client_certificate,
-      ssl_profile
+      ssl_profile,
+      firewall_policy_id,
     ]
   }
 }
